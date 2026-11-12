@@ -14,6 +14,8 @@ LayoutXLM led both macro and weighted F1 across the four evaluated splits, but t
 
 I built the reusable docTR OCR cache, implemented split checks, and trained and evaluated the three baselines.
 
+This repository includes selected examples for OCR inspection and model evaluation, along with results and prediction exports from the original WIKI-DOC test split. The full training pipeline is currently kept private.
+
 ## Dataset and methodology
 
 The experiments use the English WIKI-DOC subset of 217,866 documents across 110 classes, with 152,506 training, 32,680 validation, and 32,680 test documents. Each model uses the first page. I precomputed docTR OCR and cached the words, pixel-coordinate bounding boxes, and page dimensions so the text and multimodal runs could reuse the same OCR output.
@@ -160,22 +162,7 @@ OfficeHolder was difficult for all three models, with F1 below 41% despite 242 t
 
 ## Current work in progress
 
-### Selective multimodal fusion
-
-I’m investigating two approaches to adding visual information when the OCR-text model is uncertain.
-
-| Approach | What it combines |
-| --- | --- |
-| **DistilBERT + DiT feature fusion** | DistilBERT’s OCR-text representation and DiT’s page-image features. |
-| **DistilBERT + LayoutXLM late fusion** | Predictions from the OCR-text model and the model that jointly uses text, page images, and bounding boxes. |
-
-For both approaches, I plan to use DistilBERT’s predictions and confidence to explore when to invoke the more expensive branch. I’ll choose routing thresholds on validation data and compare the fused systems against standalone DistilBERT and always-on LayoutXLM on matched held-out splits. The evaluation will report macro F1, weighted F1, and per-class changes alongside the fraction of documents routed to the visual branch and the resulting inference cost.
-
-The [synthetic score-fusion example](examples/fuse_probabilities.py) demonstrates how to align class scores by document and label before averaging them.
-
-### External evaluation on degraded scans
-
-The benchmark uses rendered Wikipedia pages. I plan to extend the study with a small external evaluation on real scanned documents, including older or visibly degraded pages. I want to measure how OCR quality and loss of visual detail affect the text-only baseline, when visual features help, and whether a confidence-based routing rule still identifies the pages that benefit from extra processing. The scores above describe the WIKI-DOC experiments.
+I’m investigating when a text-first classifier benefits from using visual information, and whether those gains carry over to degraded document scans.
 
 ## Split integrity example
 
