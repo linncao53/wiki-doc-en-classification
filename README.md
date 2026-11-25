@@ -2,7 +2,7 @@
 
 This project asks when visual information improves document classification enough to justify the extra computation. It grew out of a proof of concept on older, degraded scans, where pages that remained readable to a person could become hard for a model to classify. English WIKI-DOC provides a controlled setting for comparing OCR text, page images, and spatial layout before evaluating how those findings transfer to real scans.
 
-LayoutXLM led both macro and weighted F1 across the four evaluated splits, but the size of its advantage varied. It also required more compute than DistilBERT in the recorded benchmark runs. That tradeoff motivates a text-first approach that adds visual processing selectively.
+Among the standalone models, LayoutXLM led both macro and weighted F1 across the four evaluated splits, but the size of its advantage varied. It also required more compute than DistilBERT in the recorded benchmark runs. That tradeoff motivates a text-first approach that adds visual processing selectively.
 
 ![Three classification pipelines for OCR text, page images, and multimodal inputs](assets/pipeline.png)
 
@@ -62,7 +62,7 @@ Macro F1 gives each class equal weight.
 | DiT | 76.20 | 84.63 | 81.00 | 82.85 |
 | LayoutXLM | 92.24 | 93.99 | 92.39 | 94.52 |
 
-LayoutXLM scored highest on each evaluated split. Across the three repeated holdouts, the best-to-worst macro F1 spread was 2.13 percentage points for LayoutXLM, 3.63 for DiT, and 6.00 for DistilBERT. These are descriptive ranges across three splits. DistilBERT came within 0.25 percentage points of LayoutXLM on split seed 42.
+LayoutXLM scored highest among the standalone models on each evaluated split. Across the three repeated holdouts, the best-to-worst macro F1 spread was 2.13 percentage points for LayoutXLM, 3.63 for DiT, and 6.00 for DistilBERT. These are descriptive ranges across three splits. DistilBERT came within 0.25 percentage points of LayoutXLM on split seed 42.
 
 ### Weighted F1
 
@@ -160,9 +160,30 @@ OfficeHolder was difficult for all three models, with F1 below 41% despite 242 t
 
 **Complementarity and input limits.** DiT scored 79.2% on Baronet against DistilBERT's 14.8%, while DistilBERT scored 98.4% on Cycad against DiT's 21.6%. These class-level reversals motivate checking whether the two models make complementary errors on the same pages. OCR quality, text truncation, image resizing, and differences in model architecture can all affect the comparison.
 
-## Current work in progress
+## Selective use of page images
 
-I’m investigating when a text-first classifier benefits from using visual information, and whether those gains carry over to degraded document scans.
+The fixed cascade uses temperature-scaled DistilBERT confidence to decide which pages receive a DistilBERT–DiT blend. It keeps the text prediction at or above 0.98 confidence. Below that cutoff, it applies a normalized geometric blend with weights 0.60 for DistilBERT and 0.40 for DiT. Temperature was selected on each validation split.
+
+At the evaluated cutoff, confidence routing scored **1.27–2.21 macro-F1 points above uniform random routing** across four test splits. Both policies used the same blend and selected exactly the same number of pages per split. The random baseline used 100 draws without replacement per split.
+
+| Test split | Pages selected for DiT | Confidence macro-F1 | Random mean macro-F1 | Always-blend macro-F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 8,810 (26.96%) | 0.93779 | 0.92072 | 0.93777 |
+| Seed 42 | 6,331 (19.37%) | 0.95289 | 0.94015 | 0.95313 |
+| Seed 43 | 8,338 (25.51%) | 0.90721 | 0.88512 | 0.90743 |
+| Seed 44 | 7,469 (22.85%) | 0.91813 | 0.90076 | 0.91850 |
+
+Confidence routing stayed within 0.04 macro-F1 points of applying the blend to every page. It captured 97.0–99.5% of the pages on which the fixed blend corrected a DistilBERT error. On the original split, it corrected 403 pages and introduced 116 errors. Blending the skipped pages would have corrected two additional pages and introduced three additional errors. These results use cached predictions and quantify model selection. End-to-end runtime with conditional execution remains unmeasured.
+
+The original-split fusion evaluation used aligned DistilBERT and DiT predictions, with standalone macro-F1 of 91.39% and 76.27% respectively. Those values come from the fusion evaluation. The standalone tables above report the earlier baseline exports.
+
+I also tested a learned per-page blend weight and a classifier trained on concatenated text and image features. Both learned variants used DiT on every test page. At the same 26.96% routing rate on the original split, the DistilBERT–LayoutXLM blend reached 93.65% macro-F1, compared with 92.50% for switching directly to LayoutXLM and 93.78% for the DistilBERT–DiT blend.
+
+[Aggregate routing results](results/dit-routing-cutoff.csv) include the random-draw percentile range and paired correction and regression counts. The [routing example](examples/route_blend.py) illustrates the gate, geometric blend, and matched-budget evaluation on synthetic logits using Python 3.9 or newer.
+
+```sh
+python examples/route_blend.py
+```
 
 ## Split integrity example
 
@@ -228,3 +249,14 @@ python examples/compare_document_errors.py examples/sample-data/original-test-di
 | Both wrong | 685 |
 
 DiT got 777 of the 1,462 pages DistilBERT missed correct (53.1%).
+
+## Research references
+
+- Fujinuma et al. (2023). WIKI-DOC benchmark. [A Multi-Modal Multilingual Benchmark for Document Image Classification](https://aclanthology.org/2023.findings-emnlp.958/)
+- Wang et al. (2022). Confidence cascades that retain earlier predictions. [Wisdom of Committees](https://openreview.net/forum?id=MvO2t0vbs4-)
+- Heskes. Geometric pooling of predictive distributions. [Selecting Weighting Factors in Logarithmic Opinion Pools](https://proceedings.neurips.cc/paper_files/paper/1997/file/59f51fd6937412b7e56ded1ea2470c25-Paper.pdf)
+- Guo et al. (2017). Temperature scaling. [On Calibration of Modern Neural Networks](https://proceedings.mlr.press/v70/guo17a.html)
+- Jacobs et al. (1991). Input-dependent gating. [Adaptive Mixtures of Local Experts](https://pubmed.ncbi.nlm.nih.gov/31141872/)
+- Baltrušaitis et al. (2019). Feature-level and decision-level fusion. [Multimodal Machine Learning: A Survey and Taxonomy](https://pubmed.ncbi.nlm.nih.gov/29994351/)
+- Ong et al. (2025). Random routing as a matched-budget baseline. [RouteLLM](https://arxiv.org/abs/2406.18665)
+- Jitkrittum et al. (2023). When uncertainty predicts the benefit of deferral. [When Does Confidence-Based Cascade Deferral Suffice?](https://papers.neurips.cc/paper_files/paper/2023/hash/1f09e1ee5035a4c3fe38a5681cae5815-Abstract-Conference.html)

@@ -1,0 +1,5 @@
+split,test_pages,routed_pages,confidence_macro_f1,random_mean_macro_f1,random_p025,random_p975,always_blend_macro_f1,routed_corrections,routed_regressions,skipped_potential_corrections,skipped_avoided_regressions
+original,32680,8810,0.93779,0.920718,0.917576,0.923103,0.937766,403,116,2,3
+42,32680,6331,0.952894,0.940146,0.938942,0.941676,0.953133,339,90,8,1
+43,32680,8338,0.907215,0.885121,0.882946,0.88751,0.907434,502,119,11,5
+44,32680,7469,0.918126,0.900759,0.898079,0.902941,0.918498,521,141,16,6
