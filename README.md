@@ -164,6 +164,25 @@ OfficeHolder was difficult for all three models, with F1 below 41% despite 242 t
 
 The fixed cascade uses temperature-scaled DistilBERT confidence to decide which pages receive a DistilBERT–DiT blend. It keeps the text prediction at or above 0.98 confidence. Below that cutoff, it applies a normalized geometric blend with weights 0.60 for DistilBERT and 0.40 for DiT. Temperature was selected on each validation split.
 
+### Original-split fusion results
+
+Same 32,680 test pages for all rows. The standalone scores here come from the aligned fusion evaluation.
+
+![Macro and weighted F1 for standalone models and fusion variants on the original WIKI-DOC split](assets/original-split-fusion-f1.png)
+
+| Configuration | Macro F1 (%) | Weighted F1 (%) | Second-stage use |
+| --- | ---: | ---: | --- |
+| DistilBERT | 91.39 | 96.08 | — |
+| DiT | 76.27 | 90.02 | — |
+| LayoutXLM | 92.24 | 96.36 | — |
+| Fixed DiT blend | 93.78 | 97.04 | 26.96% DiT |
+| Learned DiT blend | 94.02 | 97.11 | 100% DiT |
+| Joint DiT head | 93.58 | 97.08 | 100% DiT |
+| LayoutXLM switch | 92.50 | 96.51 | 26.96% LayoutXLM |
+| LayoutXLM blend | 93.65 | 96.93 | 26.96% LayoutXLM |
+
+### Confidence routing versus random routing
+
 At the evaluated cutoff, confidence routing scored **1.27–2.21 macro-F1 points above uniform random routing** across four test splits. Both policies used the same blend and selected exactly the same number of pages per split. The random baseline used 100 draws without replacement per split.
 
 | Test split | Pages selected for DiT | Confidence macro-F1 | Random mean macro-F1 | Always-blend macro-F1 |
