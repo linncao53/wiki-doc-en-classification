@@ -2,85 +2,33 @@
 
 This project asks when visual information improves document classification enough to justify the extra computation. It grew out of a proof of concept on older, degraded scans, where pages that remained readable to a person could become hard for a model to classify. English WIKI-DOC provides a controlled setting for comparing OCR text, page images, and spatial layout before evaluating how those findings transfer to real scans.
 
-**Fusion highlight.** On the original split, the fixed DistilBERT–DiT blend reached **93.78% macro-F1** using DiT scores on **26.96% of test pages**. Across four splits, confidence routing beat random routing by **1.27–2.21 macro-F1 points** at matched DiT usage.
+**[Fusion highlight](#fusion-and-selective-routing).** On the original split, the fixed DistilBERT–DiT blend reached **93.78% macro-F1** using DiT scores on **26.96% of test pages**. Across four splits, confidence routing beat random routing by **1.27–2.21 macro-F1 points** at matched DiT usage.
 
 ## Table of contents
 
-- [Fusion and selective routing](#fusion-and-selective-routing)
-  - [Original-split fusion results and figure](#original-split-fusion-results)
+- [Dataset and evaluation setup](#dataset-and-evaluation-setup)
+- [Standalone model comparison](#standalone-model-comparison)
+  - [Test F1 across splits](#test-f1-across-splits)
+  - [Runtime and compute](#runtime-and-compute)
+  - [Training curves and reliability](#training-curves-and-reliability)
+  - [Per-class performance](#per-class-performance)
+- [Fusion and selective routing (main contributions)](#fusion-and-selective-routing)
+  - [Original-split fusion results](#original-split-fusion-results)
   - [Confidence routing versus random routing](#confidence-routing-versus-random-routing)
-- [Dataset and methodology](#dataset-and-methodology)
-- [Preliminary results](#preliminary-results)
-- [Split integrity example](#split-integrity-example)
-- [Reproduce the original-split F1 scores](#reproduce-the-original-split-f1-scores)
-- [Additional runnable examples](#additional-runnable-examples)
+  - [Fusion pipelines](#fusion-pipelines)
+- [Reproducibility and code examples](#reproducibility-and-code-examples)
 - [Research references](#research-references)
 
-## Fusion and selective routing
-
-The fixed cascade uses temperature-scaled DistilBERT confidence to decide which pages receive a DistilBERT–DiT blend. It keeps the text prediction at or above 0.98 confidence. Below that cutoff, it applies a normalized geometric blend with weights 0.60 for DistilBERT and 0.40 for DiT. Temperature was selected on each validation split.
-
-### Original-split fusion results
-
-Same 32,680 test pages for all rows. The standalone scores here come from the aligned fusion evaluation.
-
-![Macro and weighted F1 for standalone models and fusion variants on the original WIKI-DOC split](assets/original-split-fusion-f1.png)
-
-| Configuration | Macro F1 (%) | Weighted F1 (%) | Second-stage use |
-| --- | ---: | ---: | --- |
-| DistilBERT | 91.39 | 96.08 | — |
-| DiT | 76.27 | 90.02 | — |
-| LayoutXLM | 92.24 | 96.36 | — |
-| Fixed DiT blend | 93.78 | 97.04 | 26.96% DiT |
-| Learned DiT blend | 94.02 | 97.11 | 100% DiT |
-| Joint DiT head | 93.58 | 97.08 | 100% DiT |
-| LayoutXLM switch | 92.50 | 96.51 | 26.96% LayoutXLM |
-| LayoutXLM blend | 93.65 | 96.93 | 26.96% LayoutXLM |
-
-### Confidence routing versus random routing
-
-At the evaluated cutoff, confidence routing scored **1.27–2.21 macro-F1 points above uniform random routing** across four test splits. Both policies used the same blend and selected exactly the same number of pages per split. The random baseline used 100 draws without replacement per split.
-
-| Test split | Pages selected for DiT | Confidence macro-F1 | Random mean macro-F1 | Always-blend macro-F1 |
-| --- | ---: | ---: | ---: | ---: |
-| Original | 8,810 (26.96%) | 0.93779 | 0.92072 | 0.93777 |
-| Seed 42 | 6,331 (19.37%) | 0.95289 | 0.94015 | 0.95313 |
-| Seed 43 | 8,338 (25.51%) | 0.90721 | 0.88512 | 0.90743 |
-| Seed 44 | 7,469 (22.85%) | 0.91813 | 0.90076 | 0.91850 |
-
-Confidence routing stayed within 0.04 macro-F1 points of applying the blend to every page. It captured 97.0–99.5% of the pages on which the fixed blend corrected a DistilBERT error. On the original split, it corrected 403 pages and introduced 116 errors. Blending the skipped pages would have corrected two additional pages and introduced three additional errors. These results use cached predictions and quantify model selection. End-to-end runtime with conditional execution remains unmeasured.
-
-The original-split fusion evaluation used aligned DistilBERT and DiT predictions, with standalone macro-F1 of 91.39% and 76.27% respectively. Those values come from the fusion evaluation. The standalone tables below report the earlier baseline exports.
-
-I also tested a learned per-page blend weight and a classifier trained on concatenated text and image features. Both learned variants used DiT on every test page. At the same 26.96% routing rate on the original split, the DistilBERT–LayoutXLM blend reached 93.65% macro-F1, compared with 92.50% for switching directly to LayoutXLM and 93.78% for the DistilBERT–DiT blend.
-
-[Aggregate routing results](results/dit-routing-cutoff.csv) include the random-draw percentile range and paired correction and regression counts. The [routing example](examples/route_blend.py) illustrates the gate, geometric blend, and matched-budget evaluation on synthetic logits using Python 3.9 or newer.
-
-```sh
-python examples/route_blend.py
-```
-
-Among the standalone models, LayoutXLM led both macro and weighted F1 across the four evaluated splits, but the size of its advantage varied. It also required more compute than DistilBERT in the recorded benchmark runs. That tradeoff motivates a text-first approach that adds visual processing selectively.
-
-![Three classification pipelines for OCR text, page images, and multimodal inputs](assets/pipeline.png)
-
-| Model | Inputs |
-| --- | --- |
-| DistilBERT | Text extracted with docTR |
-| DiT | Page images |
-| LayoutXLM | OCR text, token bounding boxes, and page images |
-
-I built the reusable docTR OCR cache, implemented split checks, and trained and evaluated the three baselines.
-
-This repository includes selected examples for OCR inspection and model evaluation, along with results and prediction exports from the original WIKI-DOC test split. The full training pipeline is currently kept private.
-
-## Dataset and methodology
+## Dataset and evaluation setup
 
 The experiments use the English WIKI-DOC subset of 217,866 documents across 110 classes, with 152,506 training, 32,680 validation, and 32,680 test documents. Each model uses the first page. I precomputed docTR OCR and cached the words, pixel-coordinate bounding boxes, and page dimensions so the text and multimodal runs could reuse the same OCR output.
 
 DistilBERT reads the OCR words as a text sequence. LayoutXLM aligns OCR tokens with their bounding boxes and also receives the page image. Both models cap the text input at 512 tokens, so OCR text near the end of long pages can be dropped. DiT takes the RGB page resized to 224 × 224 pixels, which can make small text and fine visual details harder to distinguish.
 
 ### Experiment configuration
+
+<details>
+<summary>Training settings by model</summary>
 
 | Setting | DistilBERT | DiT | LayoutXLM |
 | --- | --- | --- | --- |
@@ -91,6 +39,8 @@ DistilBERT reads the OCR words as a text sequence. LayoutXLM aligns OCR tokens w
 | Learning rate | 5 × 10⁻⁵ | 5 × 10⁻⁵ | 5 × 10⁻⁵ |
 | Warmup and validation cadence | 300 warmup steps, validation every 300 steps | 300 warmup steps, validation every 300 steps | 300 warmup steps, validation every 300 steps |
 | Training seed and checkpoint selection | 42, best validation macro F1 | 42, best validation macro F1 | 42, best validation macro F1 |
+
+</details>
 
 The experiments use `wiki-doc-en-merged` from the [Amazon Science dataset release](https://huggingface.co/datasets/AmazonScience/MultilingualMultiModalClassification). Fujinuma et al. (2023) introduced WIKI-DOC in [*A Multi-Modal Multilingual Benchmark for Document Image Classification*](https://cdn.amazon.science/b0/1f/5bb340bf41f9acd3ff144c2f8448/a-multi-modal-multilingual-benchmark-for-document-image-classification.pdf).
 
@@ -106,11 +56,15 @@ These first-page renders come from the benchmark’s training partition. Each im
 
 For split seeds 42, 43, and 44, I pooled the original partitions, shuffled document positions within each class, and restored the original train, validation, and test counts for that class. The same saved assignments were used across models for each seed. Validation macro F1 guided checkpoint selection, and the test sets were held out for evaluation. Test documents can recur across repeats, so the split ranges describe observed sensitivity to document assignment.
 
-## Preliminary results
+## Standalone model comparison
+
+These standalone experiment exports provide the baseline for the fusion study. The aligned fusion evaluation below reports its own original-split baseline scores.
 
 Both tables report test F1 (%) on the original held-out split and three class-stratified repeated holdouts. The seed columns identify the data splits.
 
-### Macro F1
+### Test F1 across splits
+
+#### Macro F1
 
 Macro F1 gives each class equal weight.
 
@@ -122,7 +76,7 @@ Macro F1 gives each class equal weight.
 
 LayoutXLM scored highest among the standalone models on each evaluated split. Across the three repeated holdouts, the best-to-worst macro F1 spread was 2.13 percentage points for LayoutXLM, 3.63 for DiT, and 6.00 for DistilBERT. These are descriptive ranges across three splits. DistilBERT came within 0.25 percentage points of LayoutXLM on split seed 42.
 
-### Weighted F1
+#### Weighted F1
 
 Weighted F1 averages the per-class F1 scores, weighting each class by its number of examples in the test split.
 
@@ -132,7 +86,10 @@ Weighted F1 averages the per-class F1 scores, weighting each class by its number
 | DiT | 89.97 | 93.21 | 92.09 | 92.71 |
 | LayoutXLM | 96.36 | 97.18 | 96.48 | 97.28 |
 
-### Recorded runtime and compute on the original split
+### Runtime and compute
+
+<details>
+<summary>Original-split runtime and Colab compute units</summary>
 
 Experiments ran on Google Colab Pro+ using NVIDIA L4 and A100 GPUs. Compute costs are reported in Colab compute units (CU).
 
@@ -147,7 +104,9 @@ Experiments ran on Google Colab Pro+ using NVIDIA L4 and A100 GPUs. Compute cost
 
 DistilBERT and LayoutXLM reused the same OCR cache. The OCR row shows the shared precompute time for each pipeline that used it. These are recorded runtimes on different GPUs, and the test timing includes export. At the time of these experiments, the hourly GPU rates were 1.54 CU/hour for the L4 and 5.30 CU/hour for the A100.
 
-### Training curves and overall reliability
+</details>
+
+### Training curves and reliability
 
 Expand each model to see its original Matplotlib figures for training and performance across splits.
 
@@ -202,7 +161,7 @@ Expand each model to see its original Matplotlib figures for training and perfor
 
 </details>
 
-### Per-class error analysis
+### Per-class performance
 
 The heatmap shows the four classes with the lowest mean F1 across models and the four remaining classes with the largest gap between their highest and lowest model scores. Test-page counts show how many examples support each row.
 
@@ -210,7 +169,7 @@ The heatmap shows the four classes with the lowest mean F1 across models and the
 
 OfficeHolder was difficult for all three models, with F1 below 41% despite 242 test pages. Baronet shows a different pattern. DistilBERT scored 14.8%, DiT 79.2%, and LayoutXLM 97.0% across 50 test pages.
 
-### Discussion
+#### Discussion
 
 **Class imbalance.** The `Other` class accounts for 16,793 of 32,680 original test documents (51.4%). Strong performance on that class contributes heavily to weighted F1. Macro F1 gives small classes the same weight as `Other`, making class-level failures easier to see alongside the aggregate result.
 
@@ -218,7 +177,106 @@ OfficeHolder was difficult for all three models, with F1 below 41% despite 242 t
 
 **Complementarity and input limits.** DiT scored 79.2% on Baronet against DistilBERT's 14.8%, while DistilBERT scored 98.4% on Cycad against DiT's 21.6%. These class-level reversals motivate checking whether the two models make complementary errors on the same pages. OCR quality, text truncation, image resizing, and differences in model architecture can all affect the comparison.
 
-## Split integrity example
+## Fusion and selective routing
+
+The fixed cascade uses temperature-scaled DistilBERT confidence to decide which pages receive a DistilBERT–DiT blend. It keeps the text prediction at or above 0.98 confidence. Below that cutoff, it applies a normalized geometric blend with weights 0.60 for DistilBERT and 0.40 for DiT. Temperature was selected on each validation split.
+
+### Original-split fusion results
+
+Same 32,680 test pages for all rows. The standalone scores here come from the aligned fusion evaluation.
+
+![Macro and weighted F1 for standalone models and fusion variants on the original WIKI-DOC split](assets/original-split-fusion-f1.png)
+
+| Configuration | Macro F1 (%) | Weighted F1 (%) | Second-stage use |
+| --- | ---: | ---: | --- |
+| DistilBERT | 91.39 | 96.08 | — |
+| DiT | 76.27 | 90.02 | — |
+| LayoutXLM | 92.24 | 96.36 | — |
+| Fixed DiT blend | 93.78 | 97.04 | 26.96% DiT |
+| Learned DiT blend | 94.02 | 97.11 | 100% DiT |
+| Joint DiT head | 93.58 | 97.08 | 100% DiT |
+| LayoutXLM switch | 92.50 | 96.51 | 26.96% LayoutXLM |
+| LayoutXLM blend | 93.65 | 96.93 | 26.96% LayoutXLM |
+
+### Confidence routing versus random routing
+
+At the evaluated cutoff, confidence routing scored **1.27–2.21 macro-F1 points above uniform random routing** across four test splits. Both policies used the same blend and selected exactly the same number of pages per split. The random baseline used 100 draws without replacement per split.
+
+| Test split | Pages selected for DiT | Confidence macro-F1 | Random mean macro-F1 | Always-blend macro-F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Original | 8,810 (26.96%) | 0.93779 | 0.92072 | 0.93777 |
+| Seed 42 | 6,331 (19.37%) | 0.95289 | 0.94015 | 0.95313 |
+| Seed 43 | 8,338 (25.51%) | 0.90721 | 0.88512 | 0.90743 |
+| Seed 44 | 7,469 (22.85%) | 0.91813 | 0.90076 | 0.91850 |
+
+Confidence routing stayed within 0.04 macro-F1 points of applying the blend to every page. It captured 97.0–99.5% of the pages on which the fixed blend corrected a DistilBERT error. On the original split, it corrected 403 pages and introduced 116 errors. Blending the skipped pages would have corrected two additional pages and introduced three additional errors. These results use cached predictions and quantify model selection. End-to-end runtime with conditional execution remains unmeasured.
+
+The original-split fusion evaluation used aligned DistilBERT and DiT predictions, with standalone macro-F1 of 91.39% and 76.27% respectively. Those values come from the fusion evaluation. The standalone tables above report the earlier baseline exports.
+
+I also tested a learned per-page blend weight and a classifier trained on concatenated text and image features. Both learned variants used DiT on every test page. At the same 26.96% routing rate on the original split, the DistilBERT–LayoutXLM blend reached 93.65% macro-F1, compared with 92.50% for switching directly to LayoutXLM and 93.78% for the DistilBERT–DiT blend.
+
+### Fusion pipelines
+
+<details>
+<summary>Fixed DistilBERT–DiT blend</summary>
+
+![Fixed DistilBERT–DiT blend pipeline](assets/fusion-pipelines/fixed.png)
+
+</details>
+
+<details>
+<summary>Learned DistilBERT–DiT blend</summary>
+
+![Learned DistilBERT–DiT blend pipeline](assets/fusion-pipelines/learned.png)
+
+</details>
+
+<details>
+<summary>DistilBERT–DiT joint feature head</summary>
+
+![DistilBERT–DiT joint feature head pipeline](assets/fusion-pipelines/joint.png)
+
+</details>
+
+<details>
+<summary>DistilBERT to LayoutXLM switch</summary>
+
+![DistilBERT to LayoutXLM switch pipeline](assets/fusion-pipelines/switch.png)
+
+</details>
+
+<details>
+<summary>DistilBERT–LayoutXLM blend</summary>
+
+![DistilBERT–LayoutXLM blend pipeline](assets/fusion-pipelines/layoutblend.png)
+
+</details>
+
+## Reproducibility and code examples
+
+### Routing example
+
+[Aggregate routing results](results/dit-routing-cutoff.csv) include the random-draw percentile range and paired correction and regression counts. The [routing example](examples/route_blend.py) illustrates the gate, geometric blend, and matched-budget evaluation on synthetic logits using Python 3.9 or newer.
+
+```sh
+python examples/route_blend.py
+```
+
+Among the standalone models, LayoutXLM led both macro and weighted F1 across the four evaluated splits, but the size of its advantage varied. It also required more compute than DistilBERT in the recorded benchmark runs. That tradeoff motivates a text-first approach that adds visual processing selectively.
+
+![Three classification pipelines for OCR text, page images, and multimodal inputs](assets/pipeline.png)
+
+| Model | Inputs |
+| --- | --- |
+| DistilBERT | Text extracted with docTR |
+| DiT | Page images |
+| LayoutXLM | OCR text, token bounding boxes, and page images |
+
+I built the reusable docTR OCR cache, implemented split checks, and trained and evaluated the three baselines.
+
+This repository includes selected examples for OCR inspection and model evaluation, along with results and prediction exports from the original WIKI-DOC test split. The full training pipeline is currently kept private.
+
+### Split integrity example
 
 [Run the Python example](examples/check_splits.py) to see how a shared manifest can catch document overlap between partitions and mismatched assignments across models for the same split seed. It uses three synthetic documents and Python 3.9 or newer.
 
@@ -226,7 +284,7 @@ OfficeHolder was difficult for all three models, with F1 below 41% despite 242 t
 python examples/check_splits.py
 ```
 
-## Reproduce the original-split F1 scores
+### Reproduce the original-split F1 scores
 
 The [per-class results CSV](results/original-split-per-class.csv) contains F1 and test-page counts for all 110 classes and each model on the original split. The [aggregation example](examples/summarize_f1.py) reproduces the original-split macro and weighted F1 values from these saved scores using Python 3.9 or newer.
 
@@ -234,7 +292,7 @@ The [per-class results CSV](results/original-split-per-class.csv) contains F1 an
 python examples/summarize_f1.py
 ```
 
-## Additional runnable examples
+### Additional runnable examples
 
 - [Compare per-class F1](examples/compare_classes.py) ranks absolute differences between two baselines using the original test results. The signed gap is the second model’s F1 minus the first model’s F1, in percentage points. A minimum test-page count lets readers inspect gaps among better-supported classes.
 - [Fuse aligned probabilities](examples/fuse_probabilities.py) shows how a weighted average combines two sets of class scores after validating document IDs and class labels. The inputs are synthetic.
@@ -244,7 +302,7 @@ python examples/compare_classes.py DistilBERT DiT --min-support 50 --top 5
 python examples/fuse_probabilities.py
 ```
 
-### Inspect OCR on one page
+#### Inspect OCR on one page
 
 [Inspect a first-page image](examples/inspect_ocr_page.py) with docTR to see the
 recognized words and their pixel boxes. The script saves an overlay and JSON with
@@ -262,7 +320,7 @@ and overlay below show docTR output for `166798.png` from the English WIKI-DOC t
 
 ![docTR word boxes on an English WIKI-DOC test page](examples/sample-data/overlay.png)
 
-### Compare errors on the same documents
+#### Compare errors on the same documents
 
 The [DistilBERT](examples/sample-data/original-test-distilbert.csv) and
 [DiT](examples/sample-data/original-test-dit.csv) prediction exports cover the
