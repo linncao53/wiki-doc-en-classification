@@ -25,6 +25,14 @@ The experiments use the English WIKI-DOC subset of 217,866 documents across 110 
 
 DistilBERT reads the OCR words as a text sequence. LayoutXLM aligns OCR tokens with their bounding boxes and also receives the page image. Both models cap the text input at 512 tokens, so OCR text near the end of long pages can be dropped. DiT takes the RGB page resized to 224 × 224 pixels, which can make small text and fine visual details harder to distinguish.
 
+| Model | Inputs |
+| --- | --- |
+| DistilBERT | Text extracted with docTR |
+| DiT | Page images |
+| LayoutXLM | OCR text, token bounding boxes, and page images |
+
+![Three classification pipelines for OCR text, page images, and multimodal inputs](assets/pipeline.png)
+
 ### Experiment configuration
 
 <details>
@@ -185,7 +193,7 @@ The fixed cascade uses temperature-scaled DistilBERT confidence to decide which 
 
 Same 32,680 test pages for all rows. The standalone scores here come from the aligned fusion evaluation.
 
-![Macro and weighted F1 for standalone models and fusion variants on the original WIKI-DOC split](assets/original-split-fusion-f1.png)
+![Macro F1, weighted F1, and accuracy for standalone models and fusion strategies on the original WIKI-DOC split](assets/original-split-fusion-f1.png)
 
 | Configuration | Macro F1 (%) | Weighted F1 (%) | Second-stage use |
 | --- | ---: | ---: | --- |
@@ -263,14 +271,6 @@ python examples/route_blend.py
 ```
 
 Among the standalone models, LayoutXLM led both macro and weighted F1 across the four evaluated splits, but the size of its advantage varied. It also required more compute than DistilBERT in the recorded benchmark runs. That tradeoff motivates a text-first approach that adds visual processing selectively.
-
-![Three classification pipelines for OCR text, page images, and multimodal inputs](assets/pipeline.png)
-
-| Model | Inputs |
-| --- | --- |
-| DistilBERT | Text extracted with docTR |
-| DiT | Page images |
-| LayoutXLM | OCR text, token bounding boxes, and page images |
 
 I built the reusable docTR OCR cache, implemented split checks, and trained and evaluated the three baselines.
 
